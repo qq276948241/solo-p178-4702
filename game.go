@@ -17,8 +17,11 @@ func NewGame(mapID int) *Game {
 		Player2:     NewSnake(18, 8, Left, termbox.ColorBlue, termbox.ColorLightBlue),
 		Foods:       []Food{},
 		Stars:       []Star{},
+		Diamond:     nil,
 		Corpses:     []Corpse{},
+		Flash:       nil,
 		LastTick:    time.Now(),
+		PausedAt:    time.Time{},
 		MenuOptions: mapNames,
 	}
 	copy(g.Walls, mapConfigs[mapID])
@@ -292,4 +295,32 @@ func (g *Game) GetTickRate() time.Duration {
 		return TickBoost
 	}
 	return TickNormal
+}
+
+func (g *Game) shiftTimers(d time.Duration) {
+	if !g.Player1.StarEnd.IsZero() {
+		g.Player1.StarEnd = g.Player1.StarEnd.Add(d)
+	}
+	if !g.Player1.BoostEnd.IsZero() {
+		g.Player1.BoostEnd = g.Player1.BoostEnd.Add(d)
+	}
+	if !g.Player1.CorpseEnd.IsZero() {
+		g.Player1.CorpseEnd = g.Player1.CorpseEnd.Add(d)
+	}
+	if !g.Player2.StarEnd.IsZero() {
+		g.Player2.StarEnd = g.Player2.StarEnd.Add(d)
+	}
+	if !g.Player2.BoostEnd.IsZero() {
+		g.Player2.BoostEnd = g.Player2.BoostEnd.Add(d)
+	}
+	if !g.Player2.CorpseEnd.IsZero() {
+		g.Player2.CorpseEnd = g.Player2.CorpseEnd.Add(d)
+	}
+	for i := range g.Corpses {
+		g.Corpses[i].ExpiresAt = g.Corpses[i].ExpiresAt.Add(d)
+	}
+	if g.Flash != nil {
+		g.Flash.ExpiresAt = g.Flash.ExpiresAt.Add(d)
+	}
+	g.LastTick = g.LastTick.Add(d)
 }

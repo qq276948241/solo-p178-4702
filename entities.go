@@ -97,6 +97,7 @@ type Game struct {
 	Corpses     []Corpse
 	Flash       *FlashMsg
 	LastTick    time.Time
+	PausedAt    time.Time
 	SelectedMap int
 	MenuOptions []string
 }

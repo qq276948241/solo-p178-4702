@@ -77,7 +77,10 @@ func (g *Game) HandleKeyPlaying(ev termbox.Event) bool {
 	case 'p', 'P':
 		if g.State == StatePlaying {
 			g.State = StatePaused
+			g.PausedAt = time.Now()
 		} else if g.State == StatePaused {
+			pauseDur := time.Since(g.PausedAt)
+			g.shiftTimers(pauseDur)
 			g.State = StatePlaying
 		}
 	case 'r', 'R':
