@@ -16,10 +16,14 @@ const (
 	TickNormal = 120 * time.Millisecond
 	TickBoost  = 55 * time.Millisecond
 
-	StarDuration     = 2000 * time.Millisecond
-	CorpseDuration   = 3000 * time.Millisecond
-	FoodSpawnChance  = 7
-	StarSpawnChance  = 15
+	StarDuration       = 2000 * time.Millisecond
+	CorpseDuration     = 3000 * time.Millisecond
+	DiamondSpawnChance = 8
+	DiamondPoints      = 5
+	DiamondGrow        = 3
+	FlashDuration      = 1200 * time.Millisecond
+	FoodSpawnChance    = 7
+	StarSpawnChance    = 15
 )
 
 type Direction int
@@ -58,6 +62,16 @@ type Star struct {
 	Pos Point
 }
 
+type Diamond struct {
+	Pos Point
+}
+
+type FlashMsg struct {
+	Text     string
+	Color    termbox.Attribute
+	ExpiresAt time.Time
+}
+
 type Corpse struct {
 	Pos       Point
 	Color     termbox.Attribute
@@ -81,7 +95,9 @@ type Game struct {
 	Player2       *Snake
 	Foods         []Food
 	Stars         []Star
+	Diamond       *Diamond
 	Corpses       []Corpse
+	Flash         *FlashMsg
 	LastTick      time.Time
 	SelectedMap   int
 	MenuOptions   []string
@@ -158,6 +174,9 @@ func NewGame(mapID int) *Game {
 	copy(g.Walls, mapConfigs[mapID])
 	g.SpawnFood()
 	g.SpawnFood()
+	if rand.Intn(DiamondSpawnChance) == 0 {
+		g.SpawnDiamond()
+	}
 	return g
 }
 
@@ -202,6 +221,9 @@ func (g *Game) Occupied(p Point) bool {
 			return true
 		}
 	}
+	if g.Diamond != nil && g.Diamond.Pos == p {
+		return true
+	}
 	for _, c := range g.Corpses {
 		if c.Pos == p {
 			return true
@@ -235,6 +257,13 @@ func (g *Game) SpawnStar() {
 	p := g.RandomEmpty()
 	if p.X >= 0 {
 		g.Stars = append(g.Stars, Star{Pos: p})
+	}
+}
+
+func (g *Game) SpawnDiamond() {
+	p := g.RandomEmpty()
+	if p.X >= 0 {
+		g.Diamond = &Diamond{Pos: p}
 	}
 }
 
@@ -379,6 +408,9 @@ func (g *Game) CheckPickups(s *Snake) {
 			if rand.Intn(StarSpawnChance) == 0 {
 				g.SpawnStar()
 			}
+			if rand.Intn(DiamondSpawnChance) == 0 && g.Diamond == nil {
+				g.SpawnDiamond()
+			}
 		}
 	}
 	for i := len(g.Stars) - 1; i >= 0; i-- {
@@ -386,6 +418,23 @@ func (g *Game) CheckPickups(s *Snake) {
 			s.StarEnd = time.Now().Add(StarDuration)
 			g.Stars = append(g.Stars[:i], g.Stars[i+1:]...)
 		}
+	}
+	if g.Diamond != nil && g.Diamond.Pos == head {
+		s.Score += DiamondPoints
+		s.GrowPending += DiamondGrow
+		name := "P1"
+		color := termbox.ColorLightRed
+		if s == g.Player2 {
+			name = "P2"
+			color = termbox.ColorLightBlue
+		}
+		g.Flash = &FlashMsg{
+			Text:      fmt.Sprintf(" %s got ♦ +5! ", name),
+			Color:     color,
+			ExpiresAt: time.Now().Add(FlashDuration),
+		}
+		g.Diamond = nil
+		g.SpawnDiamond()
 	}
 }
 
@@ -397,6 +446,9 @@ func (g *Game) Tick() {
 		if now.After(g.Corpses[i].ExpiresAt) {
 			g.Corpses = append(g.Corpses[:i], g.Corpses[i+1:]...)
 		}
+	}
+	if g.Flash != nil && now.After(g.Flash.ExpiresAt) {
+		g.Flash = nil
 	}
 	if !g.Player1.Alive && !g.Player2.Alive {
 		g.State = StateGameOver
@@ -428,13 +480,34 @@ func drawCell(x, y int, ch rune, fg, bg termbox.Attribute) {
 
 func (g *Game) Render() {
 	termbox.Clear(termbox.ColorDefault, termbox.ColorDefault)
+	scoreFg := termbox.ColorWhite | termbox.AttrBold
+	scoreBg := termbox.ColorBlack
+	flashActive := g.Flash != nil && time.Now().Before(g.Flash.ExpiresAt)
+	if flashActive {
+		elapsed := time.Since(g.Flash.ExpiresAt.Add(-FlashDuration))
+		if elapsed.Milliseconds()/120%2 == 0 {
+			scoreBg = g.Flash.Color
+			scoreFg = termbox.ColorWhite | termbox.AttrBold
+		}
+	}
 	scoreLine := fmt.Sprintf(" P1(Red): %d  |  P2(Blue): %d ", g.Player1.Score, g.Player2.Score)
-	ctrlLine := " P1: WASD + LShift  |  P2: Arrows + Space  |  P: Pause  R: Restart "
+	ctrlLine := " P1: WASD+Q Boost  |  P2: Arrows+Space Boost  |  P: Pause  R: Restart "
 	for i, c := range scoreLine {
-		termbox.SetCell(i, 0, c, termbox.ColorWhite|termbox.AttrBold, termbox.ColorBlack)
+		termbox.SetCell(i, 0, c, scoreFg, scoreBg)
 	}
 	for i, c := range ctrlLine {
 		termbox.SetCell(i, 1, c, termbox.ColorDarkGray, termbox.ColorBlack)
+	}
+	if flashActive {
+		flashLine := g.Flash.Text
+		startX := 0
+		for len(scoreLine) > startX {
+			startX++
+		}
+		startX = len(scoreLine) + 2
+		for i, c := range flashLine {
+			termbox.SetCell(startX+i, 0, c, g.Flash.Color|termbox.AttrBold, termbox.ColorBlack)
+		}
 	}
 	offsetY := 3
 	for x := 0; x < MapWidth; x++ {
@@ -464,6 +537,9 @@ func (g *Game) Render() {
 	}
 	for _, s := range g.Stars {
 		drawCell(s.Pos.X, s.Pos.Y+offsetY, '★', termbox.ColorYellow|termbox.AttrBold, termbox.ColorBlack)
+	}
+	if g.Diamond != nil {
+		drawCell(g.Diamond.Pos.X, g.Diamond.Pos.Y+offsetY, '♦', termbox.ColorYellow|termbox.AttrBold, termbox.ColorBlack)
 	}
 	g.renderSnake(g.Player1, offsetY)
 	g.renderSnake(g.Player2, offsetY)
@@ -562,6 +638,7 @@ func (g *Game) RenderMenu() {
 		"",
 		"Rules:",
 		"  ● = +1 pt    ◆ = +3 pts",
+		"  ♦ = +5 pts & grow 3! (respawns instantly)",
 		"  ★ = Wall-pass for 2 seconds",
 		"  Die: wall, self, opponent, or 'x' corpse (3s)",
 		"  P = Pause    R = Restart    M = Menu    Esc = Quit",
